@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import random
+import time
 from pypdf import PdfReader
 from pptx import Presentation
 from google import genai
@@ -8,7 +9,6 @@ from google.genai import types
 
 st.set_page_config(page_title="StudyCard Studio ✨", page_icon="📚", layout="centered")
 
-# Initialize persistent deck state
 if "master_deck" not in st.session_state:
     st.session_state["master_deck"] = []
 if "quiz_index" not in st.session_state:
@@ -79,13 +79,29 @@ with tab_create:
                     """
 
                     client = genai.Client(api_key=api_key.strip())
-                    try:
-                        res = client.models.generate_content(
-                            model="gemini-3.8-flash",
-                            contents=prompt,
-                            config=types.GenerateContentConfig(response_mime_type="application/json")
-                        )
-                        if res and res.text:
+                    res = None
+                    last_error = ""
+
+                    # Auto-retries up to 3 times with a short pause if traffic spikes
+                    for attempt in range(1, 4):
+                        try:
+                            res = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=prompt,
+                                config=types.GenerateContentConfig(response_mime_type="application/json")
+                            )
+                            if res and res.text:
+                                break
+                        except Exception as e:
+                            last_error = str(e)
+                            if "503" in str(e) or "UNAVAILABLE" in str(e):
+                                time.sleep(3)
+                                continue
+                            else:
+                                break
+
+                    if res and res.text:
+                        try:
                             new_cards = json.loads(res.text)
                             tag = chapter_tag.strip() if chapter_tag.strip() else f"Ch {len(st.session_state['master_deck'])//10 + 1}"
                             for card in new_cards:
@@ -95,10 +111,10 @@ with tab_create:
                             st.session_state["quiz_index"] = 0
                             st.session_state["show_answer"] = False
                             st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
-                        else:
-                            st.error("No response received from the model. Please try again.")
-                    except Exception as e:
-                        st.error(f"Generation error: {e}")
+                        except Exception as e:
+                            st.error(f"Error parsing flashcards: {e}")
+                    else:
+                        st.error(f"Generation error: {last_error}")
 
     if st.session_state["master_deck"]:
         st.divider()
@@ -190,5 +206,10 @@ with tab_export:
         st.caption("Copy this block and paste it directly into Quizlet or Anki under 'Import' to keep all chapters together:")
         formatted_export = "\n".join([f"[{c.get('tag', 'Exam')}] {c['question']}\t{c['answer']}" for c in deck])
         st.text_area("Tab-separated text:", value=formatted_export, height=220)
+
+
+     
+             
+
 
    
