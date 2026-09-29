@@ -21,7 +21,6 @@ st.caption("Upload your chapters one by one to build your master exam deck, then
 
 api_key = st.secrets.get("GEMINI_API_KEY")
 
-# Layout Tabs
 tab_create, tab_quiz, tab_export = st.tabs(["➕ Add Chapters", "🎯 Practice Quiz", "📥 Master Export"])
 
 def extract_text(file):
@@ -78,28 +77,40 @@ with tab_create:
                     Material:
                     {combined_text}
                     """
-                    try:
-                        response = client.models.generate_content(
-                            model="gemini-1.5-flash",
-                            contents=prompt,
-                            config=types.GenerateContentConfig(response_mime_type="application/json")
-                        )
-                        new_cards = json.loads(response.text)
-                        
-                        # Attach the chapter tag if provided
-                        tag = chapter_tag.strip() if chapter_tag.strip() else f"Ch {len(st.session_state['master_deck'])//10 + 1}"
-                        for card in new_cards:
-                            card["tag"] = tag
+                    
+                    response = None
+                    # Fallback loop: tries 2.5 Flash first, then automatically switches to 2.0 Flash if servers are busy
+                    for model_name in ["gemini-2.5-flash", "gemini-2.0-flash"]:
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=prompt,
+                                config=types.GenerateContentConfig(response_mime_type="application/json")
+                            )
+                            if response and response.text:
+                                break
+                        except Exception as model_err:
+                            if "503" in str(model_err) or "UNAVAILABLE" in str(model_err):
+                                continue
+                            else:
+                                raise model_err
 
-                        # Add new cards to the existing master deck
-                        st.session_state["master_deck"].extend(new_cards)
-                        st.session_state["quiz_index"] = 0
-                        st.session_state["show_answer"] = False
-                        st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
-                    except Exception as e:
-                        st.error(f"Error generating cards: {e}")
+                    if not response or not response.text:
+                        st.error("Google's servers are experiencing temporary peak traffic. Please click generate once more.")
+                    else:
+                        try:
+                            new_cards = json.loads(response.text)
+                            tag = chapter_tag.strip() if chapter_tag.strip() else f"Ch {len(st.session_state['master_deck'])//10 + 1}"
+                            for card in new_cards:
+                                card["tag"] = tag
 
-    # Display running total & clear option
+                            st.session_state["master_deck"].extend(new_cards)
+                            st.session_state["quiz_index"] = 0
+                            st.session_state["show_answer"] = False
+                            st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
+                        except Exception as e:
+                            st.error(f"Error parsing response: {e}")
+
     if st.session_state["master_deck"]:
         st.divider()
         col_info, col_clear = st.columns([3, 1])
@@ -119,7 +130,6 @@ with tab_quiz:
     else:
         st.subheader("🎯 Cumulative Exam Quiz")
         
-        # Navigation & Shuffle controls
         c1, c2, c3 = st.columns([1, 2, 1])
         with c1:
             if st.button("🔀 Shuffle Deck"):
@@ -132,11 +142,10 @@ with tab_quiz:
         with c3:
             current_tag = deck[st.session_state['quiz_index']].get("tag", "")
             if current_tag:
-                st.badge = st.caption(f"🏷️ {current_tag}")
+                st.caption(f"🏷️ {current_tag}")
 
         current_card = deck[st.session_state["quiz_index"]]
 
-        # Flashcard Box
         st.markdown(
             f"""
             <div style="background-color: #f7f9fc; border: 2px solid #e1e8ed; border-radius: 12px; padding: 25px; min-height: 180px; margin: 15px 0;">
@@ -147,7 +156,6 @@ with tab_quiz:
             unsafe_allow_html=True
         )
 
-        # Show Answer Toggle
         if st.session_state["show_answer"]:
             st.markdown(
                 f"""
@@ -166,7 +174,6 @@ with tab_quiz:
                 st.session_state["show_answer"] = True
                 st.rerun()
 
-        # Step controls
         col_prev, col_next = st.columns(2)
         with col_prev:
             if st.button("⬅️ Previous Card", use_container_width=True):
