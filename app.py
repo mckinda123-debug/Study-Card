@@ -8,7 +8,7 @@ from google.genai import types
 
 st.set_page_config(page_title="StudyCard Studio ✨", page_icon="📚", layout="centered")
 
-# Initialize persistent memory for stacked chapters and quiz mode
+# Initialize persistent memory
 if "master_deck" not in st.session_state:
     st.session_state["master_deck"] = []
 if "quiz_index" not in st.session_state:
@@ -17,7 +17,7 @@ if "show_answer" not in st.session_state:
     st.session_state["show_answer"] = False
 
 st.title("📚 StudyCard Studio")
-st.caption("Upload your chapters one by one to build your master exam deck, then test yourself in Quiz Mode.")
+st.caption("Upload your chapters to build your master exam deck, then test yourself in Quiz Mode.")
 
 api_key = st.secrets.get("GEMINI_API_KEY")
 
@@ -53,7 +53,7 @@ with tab_create:
 
     if st.button("✨ Generate & Add to Master Deck", type="primary", use_container_width=True):
         if not api_key:
-            st.error("API Key missing in Streamlit Secrets.")
+            st.error("API Key missing. Please check your Streamlit Secrets.")
         else:
             combined_text = ""
             if uploaded_file:
@@ -65,7 +65,8 @@ with tab_create:
                 st.warning("Please upload a file or enter readable notes.")
             else:
                 with st.spinner("Analyzing chapter and crafting exam-style questions..."):
-                    client = genai.Client(api_key=api_key)
+                    # Limit to ~40,000 characters to keep payload safe and fast
+                    safe_material = combined_text[:40000]
                     prompt = f"""
                     You are an expert exam tutor. Create exactly {num_cards} high-yield exam-prep flashcards based on this material.
                     Focus on application, distinguishing easily confused concepts, and cause/effect mechanisms.
@@ -75,28 +76,30 @@ with tab_create:
                     ]
 
                     Material:
-                    {combined_text}
+                    {safe_material}
                     """
-                    
+
+                    client = genai.Client(api_key=api_key.strip())
                     response = None
-                    # Fallback loop: tries 2.5 Flash first, then automatically switches to 2.0 Flash if servers are busy
+                    last_error = ""
+
+                    # Try available flash models
                     for model_name in ["gemini-2.5-flash", "gemini-2.0-flash"]:
                         try:
-                            response = client.models.generate_content(
+                            res = client.models.generate_content(
                                 model=model_name,
                                 contents=prompt,
                                 config=types.GenerateContentConfig(response_mime_type="application/json")
                             )
-                            if response and response.text:
+                            if res and res.text:
+                                response = res
                                 break
-                        except Exception as model_err:
-                            if "503" in str(model_err) or "UNAVAILABLE" in str(model_err):
-                                continue
-                            else:
-                                raise model_err
+                        except Exception as e:
+                            last_error = str(e)
+                            continue
 
                     if not response or not response.text:
-                        st.error("Google's servers are experiencing temporary peak traffic. Please click generate once more.")
+                        st.error(f"Generation failed: {last_error}")
                     else:
                         try:
                             new_cards = json.loads(response.text)
@@ -109,7 +112,7 @@ with tab_create:
                             st.session_state["show_answer"] = False
                             st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
                         except Exception as e:
-                            st.error(f"Error parsing response: {e}")
+                            st.error(f"Error parsing flashcards: {e}")
 
     if st.session_state["master_deck"]:
         st.divider()
