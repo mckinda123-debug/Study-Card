@@ -18,7 +18,6 @@ if "show_answer" not in st.session_state:
 st.title("📚 StudyCard Studio")
 st.caption("Upload your chapters one by one to build your master exam deck, then test yourself in Quiz Mode.")
 
-# Pulls Groq API key from Streamlit Secrets
 api_key = st.secrets.get("GROQ_API_KEY")
 
 tab_create, tab_quiz, tab_export = st.tabs(["➕ Add Chapters", "🎯 Practice Quiz", "📥 Master Export"])
@@ -64,10 +63,31 @@ with tab_create:
             if len(combined_text.strip()) < 30:
                 st.warning("Please upload a file or enter readable notes.")
             else:
-                with st.spinner("Generating high-yield exam cards with Groq..."):
+                with st.spinner("Finding active Groq model and generating cards..."):
                     try:
                         client = Groq(api_key=api_key.strip())
                         
+                        # Dynamically retrieve active models available to your Groq account
+                        available = [m.id for m in client.models.list().data]
+                        # Filter out audio (whisper) and safety guard models
+                        chat_models = [
+                            m for m in available 
+                            if not any(x in m.lower() for x in ["whisper", "guard", "embed", "safeguard"])
+                        ]
+
+                        # Automatically pick the best available model
+                        chosen_model = None
+                        for pref in ["llama-3.3", "llama-3.1", "llama3", "mixtral", "gemma"]:
+                            for m in chat_models:
+                                if pref in m.lower():
+                                    chosen_model = m
+                                    break
+                            if chosen_model:
+                                break
+
+                        if not chosen_model:
+                            chosen_model = chat_models[0] if chat_models else "llama3-8b-8192"
+
                         prompt = f"""
                         You are an expert exam tutor. Create exactly {num_cards} high-yield exam-prep flashcards based on this material.
                         Focus on application, distinguishing easily confused concepts, and cause/effect mechanisms.
@@ -84,7 +104,7 @@ with tab_create:
                         """
 
                         completion = client.chat.completions.create(
-                            model="llama-3.1-8b-instant",
+                            model=chosen_model,
                             messages=[
                                 {"role": "system", "content": "You are a professional study aid generator that outputs strictly valid JSON."},
                                 {"role": "user", "content": prompt}
@@ -102,7 +122,7 @@ with tab_create:
                         st.session_state["master_deck"].extend(new_cards)
                         st.session_state["quiz_index"] = 0
                         st.session_state["show_answer"] = False
-                        st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
+                        st.success(f"Generated via {chosen_model}! Added {len(new_cards)} cards ({len(st.session_state['master_deck'])} total in Master Deck).")
                     except Exception as e:
                         st.error(f"Generation error: {e}")
 
@@ -198,5 +218,8 @@ with tab_export:
         formatted_export = "\n".join([f"[{c.get('tag', 'Exam')}] {c['question']}\t{c['answer']}" for c in deck])
         st.text_area("Tab-separated text:", value=formatted_export, height=220)
 
+         
+           
+     
       
                 
