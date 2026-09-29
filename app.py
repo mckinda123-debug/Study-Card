@@ -63,11 +63,10 @@ with tab_create:
             if len(combined_text.strip()) < 30:
                 st.warning("Please upload a file or enter readable notes.")
             else:
-                with st.spinner("Crafting multiple-choice questions with Groq..."):
+                with st.spinner("Writing multiple choice questions..."):
                     try:
                         client = Groq(api_key=api_key.strip())
                         
-                        # Dynamically find the best active Groq model
                         available = [m.id for m in client.models.list().data]
                         chat_models = [
                             m for m in available 
@@ -87,21 +86,25 @@ with tab_create:
                             chosen_model = chat_models[0] if chat_models else "llama3-8b-8192"
 
                         prompt = f"""
-                        You are an expert exam tutor. Create exactly {num_cards} high-yield multiple-choice exam questions based on this material.
-                        Focus on conceptual application and cause/effect mechanisms.
-                        Every card MUST have 4 distinct choices labeled A, B, C, D. The answer must be strictly one letter (A, B, C, or D).
+                        You are an expert university professor creating rigorous multiple-choice exam questions.
+                        Generate exactly {num_cards} multiple choice questions based on the provided material.
 
-                        Respond ONLY with a JSON object in this exact schema:
+                        STRICT REQUIREMENTS:
+                        1. Every item MUST have 4 full and distinct answer choices: option_a, option_b, option_c, option_d.
+                        2. The "answer" field MUST strictly be one single letter: "A", "B", "C", or "D". Never put full sentences in the answer field.
+                        3. The "explanation" field must clearly explain why the correct option is right.
+
+                        Respond ONLY with this exact JSON format:
                         {{
                           "cards": [
                             {{
-                              "question": "Question stem here?",
-                              "option_a": "First choice description",
-                              "option_b": "Second choice description",
-                              "option_c": "Third choice description",
-                              "option_d": "Fourth choice description",
-                              "answer": "A",
-                              "explanation": "Clear explanation of why this answer is correct."
+                              "question": "Which of the following describes hyper-competition?",
+                              "option_a": "Stable market conditions with entrenched monopolies",
+                              "option_b": "A condition of rapid competitive moves where advantages are quickly eroded",
+                              "option_c": "An environment completely shielded from technological shifts",
+                              "option_d": "A scenario where price competition is legally prohibited",
+                              "answer": "B",
+                              "explanation": "Hyper-competition occurs when fast-moving rivals quickly erode each other's competitive advantage through relentless innovation and pricing pressure."
                             }}
                           ]
                         }}
@@ -113,7 +116,7 @@ with tab_create:
                         completion = client.chat.completions.create(
                             model=chosen_model,
                             messages=[
-                                {"role": "system", "content": "You are a professional exam creator that outputs strictly valid JSON for multiple choice questions."},
+                                {"role": "system", "content": "You are a specialized exam creation engine that only outputs strictly valid JSON containing multiple choice questions."},
                                 {"role": "user", "content": prompt}
                             ],
                             response_format={"type": "json_object"}
@@ -129,7 +132,7 @@ with tab_create:
                         st.session_state["master_deck"].extend(new_cards)
                         st.session_state["quiz_index"] = 0
                         st.session_state["show_answer"] = False
-                        st.success(f"Generated {len(new_cards)} MCQs! Total in Master Deck: {len(st.session_state['master_deck'])}.")
+                        st.success(f"Added {len(new_cards)} MCQs! Total in Master Deck: {len(st.session_state['master_deck'])}.")
                     except Exception as e:
                         st.error(f"Generation error: {e}")
 
@@ -169,32 +172,46 @@ with tab_quiz:
 
         card = deck[st.session_state["quiz_index"]]
 
-        # Front of Card: Multiple Choice Question & Options
+        # Clean fallback extraction to ensure options always display
+        q_text = card.get('question', '')
+        op_a = card.get('option_a', '')
+        op_b = card.get('option_b', '')
+        op_c = card.get('option_c', '')
+        op_d = card.get('option_d', '')
+        correct_letter = card.get('answer', 'A').strip().upper()[:1]
+        explanation = card.get('explanation', card.get('answer', ''))
+
+        # Front of Card: Question & Options A, B, C, D
         st.markdown(
             f"""
             <div style="background-color: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 12px; padding: 22px; margin: 15px 0;">
                 <h4 style="color: #93c5fd; margin-top: 0;">Question:</h4>
-                <p style="font-size: 1.15rem; font-weight: 600; line-height: 1.5;">{card.get('question', '')}</p>
+                <p style="font-size: 1.15rem; font-weight: 600; line-height: 1.5;">{q_text}</p>
                 <hr style="border: 0; border-top: 1px solid #334155; margin: 15px 0;">
                 <div style="font-size: 1.05rem; line-height: 1.8;">
-                    <p><strong>A)</strong> {card.get('option_a', '')}</p>
-                    <p><strong>B)</strong> {card.get('option_b', '')}</p>
-                    <p><strong>C)</strong> {card.get('option_c', '')}</p>
-                    <p><strong>D)</strong> {card.get('option_d', '')}</p>
+                    <p><strong>A)</strong> {op_a}</p>
+                    <p><strong>B)</strong> {op_b}</p>
+                    <p><strong>C)</strong> {op_c}</p>
+                    <p><strong>D)</strong> {op_d}</p>
                 </div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        # Back of Card: Reveal Answer (A, B, C, or D) + Explanation
+        # Back of Card: Flips to show strictly the Letter and the Explanation
         if st.session_state["show_answer"]:
-            ans_letter = card.get('answer', '').strip().upper()
+            # Find the option text corresponding to the correct letter
+            option_map = {"A": op_a, "B": op_b, "C": op_c, "D": op_d}
+            correct_choice_text = option_map.get(correct_letter, "")
+
             st.markdown(
                 f"""
                 <div style="background-color: #064e3b; color: #ecfdf5; border: 2px solid #059669; border-radius: 12px; padding: 22px; margin-bottom: 20px;">
-                    <h3 style="color: #6ee7b7; margin: 0 0 10px 0;">✅ Correct Answer: {ans_letter}</h3>
-                    <p style="font-size: 1.05rem; line-height: 1.5; color: #d1fae5;">{card.get('explanation', '')}</p>
+                    <h2 style="color: #6ee7b7; margin: 0 0 10px 0;">✅ Answer: {correct_letter}</h2>
+                    {f'<p style="font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; color: #a7f3d0;">{correct_choice_text}</p>' if correct_choice_text else ''}
+                    <hr style="border: 0; border-top: 1px solid #047857; margin: 12px 0;">
+                    <p style="font-size: 1.02rem; line-height: 1.5; color: #d1fae5;"><strong>Why:</strong> {explanation}</p>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -237,8 +254,9 @@ with tab_export:
         for c in deck:
             tag = c.get('tag', 'Exam')
             front = f"[{tag}] {c.get('question','')} | A) {c.get('option_a','')} | B) {c.get('option_b','')} | C) {c.get('option_c','')} | D) {c.get('option_d','')}"
-            back = f"Answer: {c.get('answer','')} — {c.get('explanation','')}"
+            back = f"Correct: {c.get('answer','')} — {c.get('explanation','')}"
             lines.append(f"{front}\t{back}")
 
         formatted_export = "\n".join(lines)
         st.text_area("Tab-separated text:", value=formatted_export, height=220)
+
