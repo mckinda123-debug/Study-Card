@@ -1,14 +1,13 @@
 import streamlit as st
 import json
 import random
-import time
 from pypdf import PdfReader
 from pptx import Presentation
-from google import genai
-from google.genai import types
+from groq import Groq
 
 st.set_page_config(page_title="StudyCard Studio ✨", page_icon="📚", layout="centered")
 
+# Initialize persistent memory for stacked chapters and quiz mode
 if "master_deck" not in st.session_state:
     st.session_state["master_deck"] = []
 if "quiz_index" not in st.session_state:
@@ -17,9 +16,10 @@ if "show_answer" not in st.session_state:
     st.session_state["show_answer"] = False
 
 st.title("📚 StudyCard Studio")
-st.caption("Upload your chapters to build your master exam deck, then test yourself in Quiz Mode.")
+st.caption("Upload your chapters one by one to build your master exam deck, then test yourself in Quiz Mode.")
 
-api_key = st.secrets.get("GEMINI_API_KEY")
+# Pulls Groq API key from Streamlit Secrets
+api_key = st.secrets.get("GROQ_API_KEY")
 
 tab_create, tab_quiz, tab_export = st.tabs(["➕ Add Chapters", "🎯 Practice Quiz", "📥 Master Export"])
 
@@ -53,7 +53,7 @@ with tab_create:
 
     if st.button("✨ Generate & Add to Master Deck", type="primary", use_container_width=True):
         if not api_key:
-            st.error("API Key missing. Please check your Streamlit Secrets.")
+            st.error("API Key missing. Please add GROQ_API_KEY to your Streamlit Secrets.")
         else:
             combined_text = ""
             if uploaded_file:
@@ -64,58 +64,49 @@ with tab_create:
             if len(combined_text.strip()) < 30:
                 st.warning("Please upload a file or enter readable notes.")
             else:
-                with st.spinner("Analyzing chapter and crafting exam-style questions..."):
-                    safe_material = combined_text[:40000]
-                    prompt = f"""
-                    You are an expert exam tutor. Create exactly {num_cards} high-yield exam-prep flashcards based on this material.
-                    Focus on application, distinguishing easily confused concepts, and cause/effect mechanisms.
-                    Return JSON only in this exact format:
-                    [
-                      {{"question": "Exam-style question here", "answer": "Clear, direct explanation here"}}
-                    ]
+                with st.spinner("Instant-generating high-yield exam cards with Groq..."):
+                    try:
+                        client = Groq(api_key=api_key.strip())
+                        
+                        prompt = f"""
+                        You are an expert exam tutor. Create exactly {num_cards} high-yield exam-prep flashcards based on this material.
+                        Focus on application, distinguishing easily confused concepts, and cause/effect mechanisms.
+                        
+                        Respond ONLY with a JSON object in this exact schema:
+                        {{
+                          "cards": [
+                            {{"question": "Exam-style question here", "answer": "Clear, direct explanation here"}}
+                          ]
+                        }}
 
-                    Material:
-                    {safe_material}
-                    """
+                        Material:
+                        {combined_text[:35000]}
+                        """
 
-                    client = genai.Client(api_key=api_key.strip())
-                    res = None
-                    last_error = ""
+                        completion = client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[
+                                {"role": "system", "content": "You are a professional study aid generator that outputs strictly valid JSON."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            response_format={"type": "json_object"}
+                        )
 
-                    # Auto-retries up to 3 times with a short pause if traffic spikes
-                    for attempt in range(1, 4):
-                        try:
-                            res = client.models.generate_content(
-                                model="gemini-3.8-flash",
-                                contents=prompt,
-                                config=types.GenerateContentConfig(response_mime_type="application/json")
-                            )
-                            if res and res.text:
-                                break
-                        except Exception as e:
-                            last_error = str(e)
-                            if "503" in str(e) or "UNAVAILABLE" in str(e):
-                                time.sleep(3)
-                                continue
-                            else:
-                                break
+                        parsed = json.loads(completion.choices[0].message.content)
+                        new_cards = parsed.get("cards", [])
 
-                    if res and res.text:
-                        try:
-                            new_cards = json.loads(res.text)
-                            tag = chapter_tag.strip() if chapter_tag.strip() else f"Ch {len(st.session_state['master_deck'])//10 + 1}"
-                            for card in new_cards:
-                                card["tag"] = tag
+                        tag = chapter_tag.strip() if chapter_tag.strip() else f"Ch {len(st.session_state['master_deck'])//10 + 1}"
+                        for card in new_cards:
+                            card["tag"] = tag
 
-                            st.session_state["master_deck"].extend(new_cards)
-                            st.session_state["quiz_index"] = 0
-                            st.session_state["show_answer"] = False
-                            st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
-                        except Exception as e:
-                            st.error(f"Error parsing flashcards: {e}")
-                    else:
-                        st.error(f"Generation error: {last_error}")
+                        st.session_state["master_deck"].extend(new_cards)
+                        st.session_state["quiz_index"] = 0
+                        st.session_state["show_answer"] = False
+                        st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
+                    except Exception as e:
+                        st.error(f"Generation error: {e}")
 
+    # Deck status and reset
     if st.session_state["master_deck"]:
         st.divider()
         col_info, col_clear = st.columns([3, 1])
@@ -207,9 +198,4 @@ with tab_export:
         formatted_export = "\n".join([f"[{c.get('tag', 'Exam')}] {c['question']}\t{c['answer']}" for c in deck])
         st.text_area("Tab-separated text:", value=formatted_export, height=220)
 
-
-     
-             
-
-
-   
+       
