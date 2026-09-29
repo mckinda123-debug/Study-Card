@@ -8,7 +8,7 @@ from google.genai import types
 
 st.set_page_config(page_title="StudyCard Studio ✨", page_icon="📚", layout="centered")
 
-# Initialize persistent memory
+# Initialize persistent deck state
 if "master_deck" not in st.session_state:
     st.session_state["master_deck"] = []
 if "quiz_index" not in st.session_state:
@@ -65,7 +65,6 @@ with tab_create:
                 st.warning("Please upload a file or enter readable notes.")
             else:
                 with st.spinner("Analyzing chapter and crafting exam-style questions..."):
-                    # Limit to ~40,000 characters to keep payload safe and fast
                     safe_material = combined_text[:40000]
                     prompt = f"""
                     You are an expert exam tutor. Create exactly {num_cards} high-yield exam-prep flashcards based on this material.
@@ -80,29 +79,14 @@ with tab_create:
                     """
 
                     client = genai.Client(api_key=api_key.strip())
-                    response = None
-                    last_error = ""
-
-                    # Try available flash models
-                    for model_name in ["gemini-2.5-flash", "gemini-2.0-flash"]:
-                        try:
-                            res = client.models.generate_content(
-                                model=model_name,
-                                contents=prompt,
-                                config=types.GenerateContentConfig(response_mime_type="application/json")
-                            )
-                            if res and res.text:
-                                response = res
-                                break
-                        except Exception as e:
-                            last_error = str(e)
-                            continue
-
-                    if not response or not response.text:
-                        st.error(f"Generation failed: {last_error}")
-                    else:
-                        try:
-                            new_cards = json.loads(response.text)
+                    try:
+                        res = client.models.generate_content(
+                            model="gemini-3.8-flash",
+                            contents=prompt,
+                            config=types.GenerateContentConfig(response_mime_type="application/json")
+                        )
+                        if res and res.text:
+                            new_cards = json.loads(res.text)
                             tag = chapter_tag.strip() if chapter_tag.strip() else f"Ch {len(st.session_state['master_deck'])//10 + 1}"
                             for card in new_cards:
                                 card["tag"] = tag
@@ -111,8 +95,10 @@ with tab_create:
                             st.session_state["quiz_index"] = 0
                             st.session_state["show_answer"] = False
                             st.success(f"Added {len(new_cards)} cards! Master Deck now has {len(st.session_state['master_deck'])} total cards.")
-                        except Exception as e:
-                            st.error(f"Error parsing flashcards: {e}")
+                        else:
+                            st.error("No response received from the model. Please try again.")
+                    except Exception as e:
+                        st.error(f"Generation error: {e}")
 
     if st.session_state["master_deck"]:
         st.divider()
@@ -204,3 +190,5 @@ with tab_export:
         st.caption("Copy this block and paste it directly into Quizlet or Anki under 'Import' to keep all chapters together:")
         formatted_export = "\n".join([f"[{c.get('tag', 'Exam')}] {c['question']}\t{c['answer']}" for c in deck])
         st.text_area("Tab-separated text:", value=formatted_export, height=220)
+
+   
