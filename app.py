@@ -64,7 +64,7 @@ with tab_create:
             if len(combined_text.strip()) < 30:
                 st.warning("Please upload a file or enter readable notes.")
             else:
-                with st.spinner("Instant-generating high-yield exam cards with Groq..."):
+                with st.spinner("Generating high-yield exam cards with Groq..."):
                     try:
                         client = Groq(api_key=api_key.strip())
                         
@@ -84,7 +84,7 @@ with tab_create:
                         """
 
                         completion = client.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
+                            model="llama-3.1-8b-instant",
                             messages=[
                                 {"role": "system", "content": "You are a professional study aid generator that outputs strictly valid JSON."},
                                 {"role": "user", "content": prompt}
@@ -198,4 +198,5 @@ with tab_export:
         formatted_export = "\n".join([f"[{c.get('tag', 'Exam')}] {c['question']}\t{c['answer']}" for c in deck])
         st.text_area("Tab-separated text:", value=formatted_export, height=220)
 
-       
+      
+                
